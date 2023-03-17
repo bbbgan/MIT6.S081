@@ -127,6 +127,7 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
+  p->mask = 0;
   return p;
 }
 
@@ -150,6 +151,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->mask = 0;
 }
 
 // Create a user page table for a given process,
@@ -294,7 +296,7 @@ fork(void)
   pid = np->pid;
 
   np->state = RUNNABLE;
-
+  np->mask = p->mask;
   release(&np->lock);
 
   return pid;
@@ -691,5 +693,19 @@ procdump(void)
       state = "???";
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
+  }
+}
+
+// number of processes whose state is not UNUSED
+void
+cnproc(uint64* dst)
+{
+  *dst = 0;
+  struct proc *p;
+  for(p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if(p->state != UNUSED) 
+      ++(*dst);
+    release(&p->lock);
   }
 }
