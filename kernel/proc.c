@@ -34,12 +34,12 @@ procinit(void)
       // Allocate a page for the process's kernel stack.
       // Map it high in memory, followed by an invalid
       // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
+      // char *pa = kalloc();
+      // if(pa == 0)
+      //   panic("kalloc");
+      // uint64 va = KSTACK((int) (p - proc));
+      // kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+      // p->kstack = va;
   }
   kvminithart();
 }
@@ -120,7 +120,12 @@ found:
     release(&p->lock);
     return 0;
   }
-
+  p->kpagetable = proc_kpagetable(p);
+  if (p->kpagetable == 0) {
+    freeproc(p);
+    release(&p->lock);
+    return 0;
+  }
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -141,6 +146,15 @@ freeproc(struct proc *p)
   p->trapframe = 0;
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
+  if(p->kstack) {
+    // free stack
+    uvmunmap(p->kpagetable, p->kstack, 1, 1);
+  }
+  if(p->kpagetable) {
+    ukvfree(p->kpagetable);
+  }
+  p->kpagetable = 0;
+  p->kstack = 0;
   p->pagetable = 0;
   p->sz = 0;
   p->pid = 0;
@@ -229,12 +243,11 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
-
+  kuvmcopy(p->pagetable, p->kpagetable, 0, p->sz);
   release(&p->lock);
 }
 
-// Grow or shrink user memory by n bytes.
-// Return 0 on success, -1 on failure.
+
 int
 growproc(int n)
 {
@@ -243,15 +256,20 @@ growproc(int n)
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if(( (sz + n )> PLIC) || (sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
       return -1;
+    } else {
+      if (kuvmcopy(p->pagetable, p->kpagetable, p->sz, p->sz + n) != 0)
+        return -1;
     }
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
+    kvmdealloc(p->kpagetable, p->sz, p->sz + n, 0);
   }
   p->sz = sz;
   return 0;
 }
+
 
 // Create a new process, copying the parent.
 // Sets up child kernel stack to return as if from fork() system call.
@@ -274,7 +292,11 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
-
+  if(kuvmcopy(np->pagetable, np->kpagetable, 0, np->sz) < 0){
+    freeproc(np);
+    release(&np->lock);
+    return -1;
+  }
   np->parent = p;
 
   // copy saved user registers.
@@ -473,8 +495,9 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        uvminithart(p->kpagetable);
         swtch(&c->context, &p->context);
-
+        kvminithart();
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
@@ -697,3 +720,27 @@ procdump(void)
     printf("\n");
   }
 }
+
+pagetable_t
+proc_kpagetable(struct proc *p)
+{
+  pagetable_t pagetable;
+
+  // An empty page table.
+  pagetable = uvmcreate();
+  if(pagetable == 0)
+    return 0;
+
+  // map the kernel 
+  // FIXME what if error
+  ukvminit(pagetable);
+  char *pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  uint64 va = KSTACK((int) (p - proc));
+  ukvmmap(pagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+  return pagetable;
+}
+
+

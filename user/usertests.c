@@ -2508,13 +2508,14 @@ execout(char *s)
           break;
         *(char*)(a + 4096 - 1) = 1;
       }
-
+      printf("sbrk - \n");
       // free a few pages, in order to let exec() make some
       // progress.
       for(int i = 0; i < avail; i++)
         sbrk(-4096);
       
       close(1);
+      printf("sbrk + \n");
       char *args[] = { "echo", "x", 0 };
       exec("echo", args);
       exit(0);
