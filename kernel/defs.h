@@ -63,7 +63,9 @@ void            ramdiskrw(struct buf*);
 void*           kalloc(void);
 void            kfree(void *);
 void            kinit(void);
-
+uint64          allocow(pagetable_t pagetable, uint64 va);
+int             iscowpage(pagetable_t pagetable, uint64 va);
+void            refcountadd(uint64 pa);
 // log.c
 void            initlog(int, struct superblock*);
 void            log_write(struct buf*);

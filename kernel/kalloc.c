@@ -14,6 +14,7 @@ void freerange(void *pa_start, void *pa_end);
 extern char end[]; // first address after kernel.
                    // defined by kernel.ld.
 
+extern pte_t *walk(pagetable_t pagetable, uint64 va, int alloc);
 struct run {
   struct run *next;
 };
@@ -22,11 +23,15 @@ struct {
   struct spinlock lock;
   struct run *freelist;
 } kmem;
-
+struct {
+  struct spinlock lock;
+  int count[PHYSTOP >> PGSHIFT];
+} ref;
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  initlock(&ref.lock, "ref");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -50,7 +55,13 @@ kfree(void *pa)
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
-
+  acquire(&ref.lock);
+  if (ref.count[(uint64)pa >> PGSHIFT] > 1) {
+    --ref.count[(uint64)pa >> PGSHIFT];
+    release(&ref.lock);
+    return;
+  }
+  release(&ref.lock);
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
 
@@ -72,11 +83,63 @@ kalloc(void)
 
   acquire(&kmem.lock);
   r = kmem.freelist;
-  if(r)
+  if(r) {
     kmem.freelist = r->next;
+    acquire(&ref.lock);
+    ref.count[(uint64)r >> PGSHIFT] = 1;
+    release(&ref.lock);
+  }
   release(&kmem.lock);
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk
   return (void*)r;
+}
+
+void refcountadd(uint64 pa) 
+{
+  if( (char*)pa < end || (uint64)pa >= PHYSTOP)
+    return;
+  acquire(&ref.lock);
+  ++ref.count[(uint64)pa >> PGSHIFT];
+  release(&ref.lock);
+}
+
+int iscowpage(pagetable_t pagetable, uint64 va)
+{
+  if(va >= MAXVA)
+    return -1;
+  pte_t* pte = walk(pagetable, va, 0);
+  if(pte == 0)
+    return -1;
+  if((*pte & PTE_V) == 0)
+    return -1;
+  return (*pte & PTE_COW ? 0 : -1);
+}
+
+// alloc cow page
+uint64 allocow(pagetable_t pagetable, uint64 va)
+{
+  uint64 pa = walkaddr(pagetable, va);
+  if (pa == 0)
+    return 0;
+  pte_t* pte = walk(pagetable, va, 0);
+  if(ref.count[(uint64)pa >> PGSHIFT] == 1) {
+    *pte |= PTE_W;
+    *pte &= ~PTE_COW;
+    return (uint64)pa;
+  } else {
+    char* mem = kalloc();
+    if (mem == 0)
+      return 0;
+    memmove(mem, (char*)pa, PGSIZE);
+    *pte &= ~PTE_V;
+    if(mappages(pagetable, va, PGSIZE, (uint64)mem, (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW) != 0) {
+      kfree(mem);
+      *pte |= PTE_V;
+      return 0;
+    }
+    kfree((char*)PGROUNDDOWN(pa));
+    return (uint64)mem;
+  }
 }
