@@ -13,6 +13,7 @@ struct entry {
   int value;
   struct entry *next;
 };
+pthread_mutex_t lock[NBUCKET];
 struct entry *table[NBUCKET];
 int keys[NKEYS];
 int nthread = 1;
@@ -50,8 +51,10 @@ void put(int key, int value)
     // update the existing key.
     e->value = value;
   } else {
+    pthread_mutex_lock(&lock[i]);
     // the new is new.
     insert(key, value, &table[i], table[i]);
+    pthread_mutex_unlock(&lock[i]);
   }
 }
 
@@ -102,7 +105,9 @@ main(int argc, char *argv[])
   pthread_t *tha;
   void *value;
   double t1, t0;
-
+  for (int i = 0; i < NBUCKET; ++i) {
+    pthread_mutex_init(lock + i, NULL);
+  }
   if (argc < 2) {
     fprintf(stderr, "Usage: %s nthreads\n", argv[0]);
     exit(-1);

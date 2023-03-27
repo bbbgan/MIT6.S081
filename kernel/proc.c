@@ -565,7 +565,7 @@ sleep(void *chan, struct spinlock *lk)
   // so it's okay to release lk.
   if(lk != &p->lock){  //DOC: sleeplock0
     acquire(&p->lock);  //DOC: sleeplock1
-    release(lk);
+    release(lk); 
   }
 
   // Go to sleep.
