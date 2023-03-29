@@ -520,7 +520,7 @@ writei(struct inode *ip, int user_src, uint64 src, uint off, uint n)
 int
 namecmp(const char *s, const char *t)
 {
-  return strncmp(s, t, DIRSIZ);
+  return strncmp(s,  t, DIRSIZ);
 }
 
 // Look for a directory entry in a directory.
