@@ -53,7 +53,7 @@ int             readi(struct inode*, int, uint64, uint, uint);
 void            stati(struct inode*, struct stat*);
 int             writei(struct inode*, int, uint64, uint, uint);
 void            itrunc(struct inode*);
-
+int             mmap_handler(int va, int cause);
 // ramdisk.c
 void            ramdiskinit(void);
 void            ramdiskintr(void);
